@@ -1,11 +1,11 @@
 import maya.cmds as cmds
-import maya.OpenMaya as om
 import os
 import json
 import time
 import datetime
 import getpass
 import threading
+from pynput import mouse, keyboard
 
 
 class MayaTimeTracker:
@@ -23,12 +23,16 @@ class MayaTimeTracker:
         self.idle_time = 0
         self.timer_callback_id = None
         self.running = True
+        self.user_active = False
 
         # Load existing data
         self.tracking_data = self.load_tracking_data()
 
         # Setup Maya callbacks
         self.setup_script_job()
+
+        # Setup input listeners
+        self.setup_input_listeners()
 
         # Start the background thread
         self.start_background_thread()
@@ -70,6 +74,50 @@ class MayaTimeTracker:
 
         # Maya exit callback
         cmds.scriptJob(event=["quitApplication", self.on_maya_exit])
+
+    def setup_input_listeners(self):
+        """Set up listeners for mouse and keyboard activity"""
+        # Create and start mouse listener
+        self.mouse_listener = mouse.Listener(
+            on_move=self.on_mouse_move,
+            on_click=self.on_mouse_click,
+            on_scroll=self.on_mouse_scroll
+        )
+        self.mouse_listener.daemon = True
+        self.mouse_listener.start()
+
+        # Create and start keyboard listener
+        self.keyboard_listener = keyboard.Listener(
+            on_press=self.on_key_press,
+            on_release=self.on_key_release
+        )
+        self.keyboard_listener.daemon = True
+        self.keyboard_listener.start()
+
+    def on_mouse_move(self, x, y):
+        """Callback for mouse movement"""
+        self.user_active = True
+        self.last_activity_time = time.time()
+
+    def on_mouse_click(self, x, y, button, pressed):
+        """Callback for mouse clicks"""
+        self.user_active = True
+        self.last_activity_time = time.time()
+
+    def on_mouse_scroll(self, x, y, dx, dy):
+        """Callback for mouse scrolling"""
+        self.user_active = True
+        self.last_activity_time = time.time()
+
+    def on_key_press(self, key):
+        """Callback for keyboard press"""
+        self.user_active = True
+        self.last_activity_time = time.time()
+
+    def on_key_release(self, key):
+        """Callback for keyboard release"""
+        self.user_active = True
+        self.last_activity_time = time.time()
 
     def start_background_thread(self):
         """Start a background daemon thread for activity monitoring"""
@@ -114,6 +162,11 @@ class MayaTimeTracker:
     def on_maya_exit(self):
         """Called when Maya is about to exit"""
         self.running = False
+        # Stop input listeners
+        if hasattr(self, 'mouse_listener') and self.mouse_listener.is_alive():
+            self.mouse_listener.stop()
+        if hasattr(self, 'keyboard_listener') and self.keyboard_listener.is_alive():
+            self.keyboard_listener.stop()
         self.end_tracking_session()
 
     def start_tracking_session(self, start_file):
@@ -167,6 +220,7 @@ class MayaTimeTracker:
 
         self.is_tracking = True
         self.last_activity_time = time.time()
+        self.user_active = True  # Start by assuming user is active
 
     def end_tracking_session(self):
         """End the current tracking session"""
@@ -200,22 +254,16 @@ class MayaTimeTracker:
 
         current_time = time.time()
         elapsed = current_time - self.last_activity_time
-        self.last_activity_time = current_time
 
-        # Check for active Maya operations to determine if user was active
-        # In a production environment, you might use more sophisticated activity detection
-        # such as checking for changes in scene, or mouse/keyboard input
-        is_active = False
-        try:
-            # Simple check: if Maya is responsive and not in idle state
-            is_active = not cmds.about(batch=True)
-        except:
-            is_active = True  # Default to active if we can't determine
+        # Determine if user is idle based on time since last input
+        is_idle = (current_time - self.last_activity_time) > self.IDLE_THRESHOLD
 
-        # Determine if user was active or idle
-        if not is_active or elapsed > self.IDLE_THRESHOLD:
+        if is_idle:
+            # User is idle
             self.idle_time += elapsed
+            self.user_active = False
         else:
+            # User is active
             self.active_time += elapsed
 
         # Update the current session
@@ -228,6 +276,9 @@ class MayaTimeTracker:
             current_datetime = datetime.datetime.now()
             time_str = current_datetime.strftime("%Y-%m-%d %H:%M:%S")
             self.current_session["end_time"] = time_str
+
+        # Reset last activity time for next interval
+        self.last_activity_time = current_time
 
 
 # Global instance
