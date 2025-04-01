@@ -10,7 +10,7 @@ from pynput import mouse, keyboard
 class BaseTimeTracker:
     def __init__(self):
         # Constants
-        self.IDLE_THRESHOLD = 300  # seconds without activity considered idle
+        self.IDLE_THRESHOLD = 180  # seconds without activity considered idle
         self.JSON_FILE = os.path.expanduser("~/activity_time_tracking.json")
         self.CHECK_INTERVAL = 5  # seconds between activity checks
 
