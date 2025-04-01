@@ -260,6 +260,7 @@ class MayaTimeTracker(BaseTimeTracker):
         try:
             import maya.cmds as cmds
         except:
+            print("RUN IN MAYA")
             return
         self.cmds = cmds
 
