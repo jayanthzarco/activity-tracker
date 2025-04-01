@@ -257,7 +257,10 @@ class MayaTimeTracker(BaseTimeTracker):
         super(MayaTimeTracker, self).__init__()
 
         # Import Maya modules here to avoid issues if used in non-Maya environment
-        import maya.cmds as cmds
+        try:
+            import maya.cmds as cmds
+        except:
+            return
         self.cmds = cmds
 
         # Setup Maya callbacks
