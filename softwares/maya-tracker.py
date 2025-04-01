@@ -22,6 +22,7 @@ class BaseTimeTracker:
         self.idle_time = 0
         self.running = True
         self.user_active = False
+        self.last_save_time = 0
 
         # Load existing data
         self.tracking_data = self.load_tracking_data()
@@ -97,6 +98,12 @@ class BaseTimeTracker:
         self.user_active = True
         self.last_activity_time = time.time()
 
+    def seconds_to_hh_mm_ss(self, seconds):
+        """Convert seconds to HH:MM:SS format"""
+        hours, remainder = divmod(int(seconds), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
     def start_background_thread(self):
         """Start a background daemon thread for activity monitoring"""
         self.thread = threading.Thread(target=self.activity_monitor_thread)
@@ -133,8 +140,13 @@ class BaseTimeTracker:
         if matching_session:
             # Continue the existing session
             self.current_session = matching_session
-            self.active_time = matching_session["active_time"]
-            self.idle_time = matching_session["idle_time"]
+            # Parse the time format back to seconds for internal tracking
+            active_parts = matching_session["active_time"].split(":")
+            idle_parts = matching_session["idle_time"].split(":")
+
+            self.active_time = int(active_parts[0]) * 3600 + int(active_parts[1]) * 60 + int(active_parts[2])
+            self.idle_time = int(idle_parts[0]) * 3600 + int(idle_parts[1]) * 60 + int(idle_parts[2])
+
             print(f"TimeTracker: Continuing tracking session for {start_file}")
         else:
             # Create a new session
@@ -148,9 +160,9 @@ class BaseTimeTracker:
                 "start_file": start_file,
                 "end_file": start_file,  # Initially same as start
                 "start_time": time_str,
-                "active_time": 0,
-                "idle_time": 0,
-                "total_time": 0,
+                "active_time": "00:00:00",
+                "idle_time": "00:00:00",
+                "total_time": "00:00:00",
                 "end_time": time_str  # Will be updated
             }
 
@@ -161,6 +173,7 @@ class BaseTimeTracker:
 
         self.is_tracking = True
         self.last_activity_time = time.time()
+        self.last_save_time = time.time()
         self.user_active = True  # Start by assuming user is active
 
     def end_tracking_session(self):
@@ -176,13 +189,14 @@ class BaseTimeTracker:
         time_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
 
         self.current_session["end_time"] = time_str
-        self.current_session["active_time"] = int(self.active_time)
-        self.current_session["idle_time"] = int(self.idle_time)
-        self.current_session["total_time"] = int(self.active_time + self.idle_time)
+        self.current_session["active_time"] = self.seconds_to_hh_mm_ss(self.active_time)
+        self.current_session["idle_time"] = self.seconds_to_hh_mm_ss(self.idle_time)
+        self.current_session["total_time"] = self.seconds_to_hh_mm_ss(self.active_time + self.idle_time)
 
         self.save_tracking_data()
 
-        print(f"TimeTracker: Ended tracking session. Active: {int(self.active_time)}s, Idle: {int(self.idle_time)}s")
+        print(
+            f"TimeTracker: Ended tracking session. Active: {self.seconds_to_hh_mm_ss(self.active_time)}, Idle: {self.seconds_to_hh_mm_ss(self.idle_time)}")
 
         # Reset state
         self.is_tracking = False
@@ -194,7 +208,6 @@ class BaseTimeTracker:
             return
 
         current_time = time.time()
-        elapsed = current_time - self.last_activity_time
 
         # Determine if user is idle based on time since last input
         is_idle = (current_time - self.last_activity_time) > self.IDLE_THRESHOLD
@@ -209,14 +222,19 @@ class BaseTimeTracker:
 
         # Update the current session
         if self.current_session:
-            self.current_session["active_time"] = int(self.active_time)
-            self.current_session["idle_time"] = int(self.idle_time)
-            self.current_session["total_time"] = int(self.active_time + self.idle_time)
+            self.current_session["active_time"] = self.seconds_to_hh_mm_ss(self.active_time)
+            self.current_session["idle_time"] = self.seconds_to_hh_mm_ss(self.idle_time)
+            self.current_session["total_time"] = self.seconds_to_hh_mm_ss(self.active_time + self.idle_time)
 
             # Update end time
             current_datetime = datetime.datetime.now()
             time_str = current_datetime.strftime("%Y-%m-%d %H:%M:%S")
             self.current_session["end_time"] = time_str
+
+            # Save to JSON every 5 seconds
+            if current_time - self.last_save_time >= 5:
+                self.save_tracking_data()
+                self.last_save_time = current_time
 
     def shutdown(self):
         """Clean shutdown of tracker"""
@@ -301,30 +319,6 @@ class MayaTimeTracker(BaseTimeTracker):
         app_name = f"Maya {maya_version}"
         self.start_tracking_session(app_name, file_name)
 
-
-class BlenderTimeTracker(BaseTimeTracker):
-    """Example implementation for Blender"""
-
-    def __init__(self):
-        # Define Blender-specific constants
-        self.JSON_FILE = os.path.expanduser("~/blender_time_tracking.json")
-
-        # Call parent constructor
-        super(BlenderTimeTracker, self).__init__()
-
-        # Import Blender modules (would be done here)
-        # import bpy
-        # self.bpy = bpy
-
-        # Setup Blender callbacks - this would be implementation-specific
-        # self.setup_blender_handlers()
-
-        print("Blender Time Tracker initialized - EXAMPLE ONLY")
-
-    # Additional Blender-specific methods would be implemented here
-
-
-# Global instance for Maya
 maya_tracker = None
 
 
@@ -336,22 +330,7 @@ def initialize_maya_tracker():
     return maya_tracker
 
 
-# Function to instantiate tracker for any other application
-def create_tracker_for_application(app_name, json_file_path=None):
-    """Create a custom tracker for any application"""
-    tracker = BaseTimeTracker()
-    if json_file_path:
-        tracker.JSON_FILE = json_file_path
-    print(f"Created time tracker for {app_name}")
-    return tracker
-
-
 # Auto-initialize when imported in Maya
 if __name__ == "__main__":
-    # This would be the entry point when running as a script
-    # For testing, you could create a simple tracker
-    test_tracker = create_tracker_for_application("TestApp")
-    test_tracker.start_tracking_session("TestApp", "test_file.txt")
-
     # In production, you would use:
-    # initialize_maya_tracker()
+    initialize_maya_tracker()
