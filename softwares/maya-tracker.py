@@ -1,4 +1,3 @@
-import maya.cmds as cmds
 import os
 import json
 import time
@@ -8,11 +7,11 @@ import threading
 from pynput import mouse, keyboard
 
 
-class MayaTimeTracker:
+class BaseTimeTracker:
     def __init__(self):
         # Constants
         self.IDLE_THRESHOLD = 60  # seconds without activity considered idle
-        self.JSON_FILE = os.path.expanduser("~/maya_time_tracking.json")
+        self.JSON_FILE = os.path.expanduser("~/activity_time_tracking.json")
         self.CHECK_INTERVAL = 5  # seconds between activity checks
 
         # State variables
@@ -21,15 +20,11 @@ class MayaTimeTracker:
         self.last_activity_time = None
         self.active_time = 0
         self.idle_time = 0
-        self.timer_callback_id = None
         self.running = True
         self.user_active = False
 
         # Load existing data
         self.tracking_data = self.load_tracking_data()
-
-        # Setup Maya callbacks
-        self.setup_script_job()
 
         # Setup input listeners
         self.setup_input_listeners()
@@ -37,7 +32,7 @@ class MayaTimeTracker:
         # Start the background thread
         self.start_background_thread()
 
-        print("Maya Time Tracker initialized and running in background")
+        print("Base Time Tracker initialized and running in background")
 
     def load_tracking_data(self):
         """Load existing tracking data from JSON file"""
@@ -57,23 +52,6 @@ class MayaTimeTracker:
                 json.dump(self.tracking_data, f, indent=4)
         except Exception as e:
             print(f"TimeTracker: Error saving tracking data: {e}")
-
-    def setup_script_job(self):
-        """Set up Maya script jobs to track file operations"""
-        # File open callback
-        cmds.scriptJob(event=["SceneOpened", self.on_file_open])
-
-        # New scene callback
-        cmds.scriptJob(event=["NewSceneOpened", self.on_new_scene])
-
-        # File save callback
-        cmds.scriptJob(event=["SceneSaved", self.on_file_save])
-
-        # Before scene save callback (to capture final file name)
-        cmds.scriptJob(event=["BeforeSave", self.before_file_save])
-
-        # Maya exit callback
-        cmds.scriptJob(event=["quitApplication", self.on_maya_exit])
 
     def setup_input_listeners(self):
         """Set up listeners for mouse and keyboard activity"""
@@ -122,7 +100,7 @@ class MayaTimeTracker:
     def start_background_thread(self):
         """Start a background daemon thread for activity monitoring"""
         self.thread = threading.Thread(target=self.activity_monitor_thread)
-        self.thread.daemon = True  # Set as daemon so it terminates when Maya exits
+        self.thread.daemon = True  # Set as daemon so it terminates when main application exits
         self.thread.start()
 
     def activity_monitor_thread(self):
@@ -132,44 +110,7 @@ class MayaTimeTracker:
                 self.check_activity()
             time.sleep(self.CHECK_INTERVAL)
 
-    def on_file_open(self):
-        """Called when a file is opened"""
-        file_path = cmds.file(q=True, sn=True)
-        if file_path:
-            file_name = os.path.basename(file_path)
-            self.start_tracking_session(file_name)
-
-    def on_new_scene(self):
-        """Called when a new scene is created"""
-        self.start_tracking_session("untitled")
-
-    def before_file_save(self):
-        """Called before a file is saved"""
-        # Just to capture the fact we're about to save
-        if self.is_tracking:
-            self.check_activity()  # Update activity times
-
-    def on_file_save(self):
-        """Called when a file is saved"""
-        file_path = cmds.file(q=True, sn=True)
-        file_name = os.path.basename(file_path) if file_path else "untitled"
-
-        if self.current_session:
-            self.current_session["end_file"] = file_name
-            self.save_tracking_data()
-            print(f"TimeTracker: Updated session for {file_name}")
-
-    def on_maya_exit(self):
-        """Called when Maya is about to exit"""
-        self.running = False
-        # Stop input listeners
-        if hasattr(self, 'mouse_listener') and self.mouse_listener.is_alive():
-            self.mouse_listener.stop()
-        if hasattr(self, 'keyboard_listener') and self.keyboard_listener.is_alive():
-            self.keyboard_listener.stop()
-        self.end_tracking_session()
-
-    def start_tracking_session(self, start_file):
+    def start_tracking_session(self, app_name, start_file):
         """Start a new tracking session"""
         # Check if we already have a session for today with the same file
         today = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -184,6 +125,7 @@ class MayaTimeTracker:
         for session in reversed(self.tracking_data):
             if (session["log_date"] == today and
                     session["username"] == username and
+                    session["application"] == app_name and
                     session["start_file"] == start_file):
                 matching_session = session
                 break
@@ -196,14 +138,13 @@ class MayaTimeTracker:
             print(f"TimeTracker: Continuing tracking session for {start_file}")
         else:
             # Create a new session
-            maya_version = cmds.about(version=True)
             current_time = datetime.datetime.now()
             time_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
 
             self.current_session = {
                 "username": username,
                 "log_date": today,
-                "software": f"maya {maya_version}",
+                "application": app_name,
                 "start_file": start_file,
                 "end_file": start_file,  # Initially same as start
                 "start_time": time_str,
@@ -260,11 +201,11 @@ class MayaTimeTracker:
 
         if is_idle:
             # User is idle
-            self.idle_time += elapsed
+            self.idle_time += self.CHECK_INTERVAL
             self.user_active = False
         else:
             # User is active
-            self.active_time += elapsed
+            self.active_time += self.CHECK_INTERVAL
 
         # Update the current session
         if self.current_session:
@@ -277,21 +218,140 @@ class MayaTimeTracker:
             time_str = current_datetime.strftime("%Y-%m-%d %H:%M:%S")
             self.current_session["end_time"] = time_str
 
-        # Reset last activity time for next interval
-        self.last_activity_time = current_time
+    def shutdown(self):
+        """Clean shutdown of tracker"""
+        self.running = False
+        # Stop input listeners
+        if hasattr(self, 'mouse_listener') and self.mouse_listener.is_alive():
+            self.mouse_listener.stop()
+        if hasattr(self, 'keyboard_listener') and self.keyboard_listener.is_alive():
+            self.keyboard_listener.stop()
+        self.end_tracking_session()
+        print("Time Tracker shut down")
 
 
-# Global instance
-time_tracker = None
+class MayaTimeTracker(BaseTimeTracker):
+    def __init__(self):
+        # Define Maya-specific constants
+        self.JSON_FILE = os.path.expanduser("~/maya_time_tracking.json")
+
+        # Call parent constructor
+        super(MayaTimeTracker, self).__init__()
+
+        # Import Maya modules here to avoid issues if used in non-Maya environment
+        import maya.cmds as cmds
+        self.cmds = cmds
+
+        # Setup Maya callbacks
+        self.setup_script_job()
+
+        print("Maya Time Tracker initialized")
+
+    def setup_script_job(self):
+        """Set up Maya script jobs to track file operations"""
+        # File open callback
+        self.cmds.scriptJob(event=["SceneOpened", self.on_file_open])
+
+        # New scene callback
+        self.cmds.scriptJob(event=["NewSceneOpened", self.on_new_scene])
+
+        # File save callback
+        self.cmds.scriptJob(event=["SceneSaved", self.on_file_save])
+
+        # Before scene save callback (to capture final file name)
+        self.cmds.scriptJob(event=["BeforeSave", self.before_file_save])
+
+        # Maya exit callback
+        self.cmds.scriptJob(event=["quitApplication", self.on_maya_exit])
+
+    def on_file_open(self):
+        """Called when a file is opened"""
+        file_path = self.cmds.file(q=True, sn=True)
+        if file_path:
+            file_name = os.path.basename(file_path)
+            self.start_maya_session(file_name)
+
+    def on_new_scene(self):
+        """Called when a new scene is created"""
+        self.start_maya_session("untitled")
+
+    def before_file_save(self):
+        """Called before a file is saved"""
+        # Just to capture the fact we're about to save
+        if self.is_tracking:
+            self.check_activity()  # Update activity times
+
+    def on_file_save(self):
+        """Called when a file is saved"""
+        file_path = self.cmds.file(q=True, sn=True)
+        file_name = os.path.basename(file_path) if file_path else "untitled"
+
+        if self.current_session:
+            self.current_session["end_file"] = file_name
+            self.save_tracking_data()
+            print(f"TimeTracker: Updated session for {file_name}")
+
+    def on_maya_exit(self):
+        """Called when Maya is about to exit"""
+        self.shutdown()
+
+    def start_maya_session(self, file_name):
+        """Start tracking for a Maya file"""
+        maya_version = self.cmds.about(version=True)
+        app_name = f"Maya {maya_version}"
+        self.start_tracking_session(app_name, file_name)
 
 
-def initialize_tracker():
-    """Initialize the tracker singleton"""
-    global time_tracker
-    if time_tracker is None:
-        time_tracker = MayaTimeTracker()
-    return time_tracker
+class BlenderTimeTracker(BaseTimeTracker):
+    """Example implementation for Blender"""
+
+    def __init__(self):
+        # Define Blender-specific constants
+        self.JSON_FILE = os.path.expanduser("~/blender_time_tracking.json")
+
+        # Call parent constructor
+        super(BlenderTimeTracker, self).__init__()
+
+        # Import Blender modules (would be done here)
+        # import bpy
+        # self.bpy = bpy
+
+        # Setup Blender callbacks - this would be implementation-specific
+        # self.setup_blender_handlers()
+
+        print("Blender Time Tracker initialized - EXAMPLE ONLY")
+
+    # Additional Blender-specific methods would be implemented here
 
 
-# Auto-initialize when imported
-initialize_tracker()
+# Global instance for Maya
+maya_tracker = None
+
+
+def initialize_maya_tracker():
+    """Initialize the Maya tracker singleton"""
+    global maya_tracker
+    if maya_tracker is None:
+        maya_tracker = MayaTimeTracker()
+    return maya_tracker
+
+
+# Function to instantiate tracker for any other application
+def create_tracker_for_application(app_name, json_file_path=None):
+    """Create a custom tracker for any application"""
+    tracker = BaseTimeTracker()
+    if json_file_path:
+        tracker.JSON_FILE = json_file_path
+    print(f"Created time tracker for {app_name}")
+    return tracker
+
+
+# Auto-initialize when imported in Maya
+if __name__ == "__main__":
+    # This would be the entry point when running as a script
+    # For testing, you could create a simple tracker
+    test_tracker = create_tracker_for_application("TestApp")
+    test_tracker.start_tracking_session("TestApp", "test_file.txt")
+
+    # In production, you would use:
+    # initialize_maya_tracker()
