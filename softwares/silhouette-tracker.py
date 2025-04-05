@@ -1,9 +1,4 @@
-import os
-import json
-import time
-import datetime
-import getpass
-import threading
+import os, json, time, datetime, getpass, threading
 from pynput import mouse, keyboard
 
 
@@ -250,183 +245,82 @@ class BaseTimeTracker:
 
 class SilhouetteTimeTracker(BaseTimeTracker):
     def __init__(self):
-        # Define Silhouette-specific constants
+        # Define SilhouetteFX-specific constants
         self.JSON_FILE = os.path.expanduser("~/silhouette_time_tracking.json")
+
+        # Import SilhouetteFX modules here
+        try:
+            import fx
+            self.fx = fx
+        except ImportError:
+            print("RUN IN SILHOUETTEFX")
+            return
 
         # Call parent constructor
         super(SilhouetteTimeTracker, self).__init__()
 
-        # Import Silhouette modules here to avoid issues if used in non-Silhouette environment
+        # Setup SilhouetteFX exit callback - will need to adapt to how Silhouette handles exits
+        # Example: self.fx.on_exit(self.on_script_close)
+
+        # Initialize tracking if a file is already open
+        self.initialize_tracking()
+
+        print("SilhouetteFX Time Tracker initialized")
+
+    def initialize_tracking(self):
+        """Initialize tracking based on current SilhouetteFX state"""
         try:
-            import fx
-        except ImportError:
-            print("RUN IN SILHOUETTE FX")
-            return
-        self.fx = fx
+            # Get the current project/script file - adapt to SilhouetteFX's API
+            file_path = self.fx.activeSession()  # Replace with actual SilhouetteFX API call
+            file_name = os.path.basename(file_path) if file_path else "untitled"
 
-        # Setup Silhouette callbacks/monitoring
-        self.setup_monitoring()
+            # Get SilhouetteFX version
+            silhouette_version = self.fx.version  # Replace with actual SilhouetteFX API call
+            app_name = f"SilhouetteFX {silhouette_version}"
 
-        print("Silhouette FX Time Tracker initialized")
-
-    def setup_monitoring(self):
-        """Set up Silhouette monitoring to track file operations"""
-        try:
-            # Silhouette Python API usage depends on the version
-            # The approach below uses both a polling method and attempts to use callbacks if available
-
-            # Start file monitoring thread
-            self.start_file_monitoring()
-
-            # Try to set up signal/event handlers if available in this Silhouette version
-            self.setup_event_handlers()
-
+            self.start_tracking_session(app_name, file_name)
         except Exception as e:
-            print(f"TimeTracker: Error setting up Silhouette monitoring: {e}")
+            print(f"TimeTracker: Error initializing tracking: {e}")
 
-    def start_file_monitoring(self):
-        """Start a thread to monitor file changes in Silhouette"""
-
-        def monitor_silhouette_files():
-            last_project_path = ""
-
-            while self.running:
-                try:
-                    # Get current project file
-                    current_path = self.get_current_project_path()
-
-                    # Check if project file changed
-                    if current_path != last_project_path:
-                        if current_path:
-                            # New project loaded or saved
-                            file_name = os.path.basename(current_path)
-                            self.start_silhouette_session(file_name)
-                        else:
-                            # Project may have been closed
-                            self.end_tracking_session()
-
-                        last_project_path = current_path
-
-                except Exception as e:
-                    print(f"TimeTracker: Error monitoring Silhouette files: {e}")
-
-                # Check every few seconds
-                time.sleep(5)
-
-        # Start the monitoring thread
-        monitor_thread = threading.Thread(target=monitor_silhouette_files)
-        monitor_thread.daemon = True
-        monitor_thread.start()
-
-    def setup_event_handlers(self):
-        """Set up event handlers for Silhouette if available"""
-        try:
-            # Silhouette has different script interfaces in different versions
-            # Try to attach to events if they exist
-
-            # Method 1: Try using script object if available (newer versions)
-            if hasattr(self.fx, 'script'):
-                # Connect to file open/save events if they exist
-                if hasattr(self.fx.script, 'connect'):
-                    # Example connection to events (adjust based on actual API)
-                    self.fx.script.connect("projectOpened", self.on_project_opened)
-                    self.fx.script.connect("projectSaved", self.on_project_saved)
-                    self.fx.script.connect("projectClosed", self.on_project_closed)
-                    self.fx.script.connect("applicationExit", self.on_application_exit)
-
-            # Method 2: Try older API styles
-            elif hasattr(self.fx, 'addCallback'):
-                # Example for older API style
-                self.fx.addCallback("open", self.on_project_opened)
-                self.fx.addCallback("save", self.on_project_saved)
-                self.fx.addCallback("close", self.on_project_closed)
-                self.fx.addCallback("exit", self.on_application_exit)
-
-        except Exception as e:
-            print(f"TimeTracker: Could not set up Silhouette event handlers: {e}")
-            print("Using polling method only")
-
-    def get_current_project_path(self):
-        """Get the path of the current project in Silhouette"""
-        try:
-            # Method 1: Try using project object if available
-            if hasattr(self.fx, 'project'):
-                return self.fx.project.path()
-
-            # Method 2: Try alternative API
-            elif hasattr(self.fx, 'getProjectPath'):
-                return self.fx.getProjectPath()
-
-            # Method 3: Another possible path getter
-            elif hasattr(self.fx, 'getCurrentProject'):
-                project = self.fx.getCurrentProject()
-                if project:
-                    return project.getPath()
-
-            # No method worked
-            return ""
-
-        except Exception as e:
-            print(f"TimeTracker: Error getting Silhouette project path: {e}")
-            return ""
-
-    def get_silhouette_version(self):
-        """Get Silhouette version"""
-        try:
-            # Try different methods to get version
-            if hasattr(self.fx, 'version'):
-                return self.fx.version()
-            elif hasattr(self.fx, 'getVersion'):
-                return self.fx.getVersion()
-            else:
-                return "Unknown"
-        except:
-            return "Unknown"
-
-    def on_project_opened(self, *args, **kwargs):
-        """Called when a project is opened"""
-        file_path = self.get_current_project_path()
-        if file_path:
-            file_name = os.path.basename(file_path)
-            self.start_silhouette_session(file_name)
-
-    def on_project_saved(self, *args, **kwargs):
-        """Called when a project is saved"""
-        file_path = self.get_current_project_path()
-        file_name = os.path.basename(file_path) if file_path else "untitled"
-
-        if self.current_session:
-            self.current_session["end_file"] = file_name
-            self.save_tracking_data()
-            print(f"TimeTracker: Updated session for {file_name}")
-
-    def on_project_closed(self, *args, **kwargs):
-        """Called when a project is closed"""
-        self.end_tracking_session()
-
-    def on_application_exit(self, *args, **kwargs):
-        """Called when Silhouette is exiting"""
+    def on_script_close(self):
+        """Called when SilhouetteFX script is closed or SilhouetteFX is exiting"""
         self.shutdown()
 
-    def start_silhouette_session(self, file_name):
-        """Start tracking for a Silhouette file"""
-        silhouette_version = self.get_silhouette_version()
-        app_name = f"Silhouette FX {silhouette_version}"
-        self.start_tracking_session(app_name, file_name)
+    def check_activity(self):
+        """Override check_activity to also update file information"""
+        # First, run the parent class's check_activity
+        super(SilhouetteTimeTracker, self).check_activity()
+
+        # Then, update file information
+        try:
+            if self.is_tracking and self.current_session:
+                # Get current file information from SilhouetteFX
+                file_path = self.fx.activeSession()  # Replace with actual SilhouetteFX API call
+                current_file = os.path.basename(file_path) if file_path else "untitled"
+
+                # If no start file is set, use current file as start file
+                if not self.current_session["start_file"] or self.current_session["start_file"] == "untitled":
+                    if current_file != "untitled":
+                        self.current_session["start_file"] = current_file
+
+                # Always update end file to current file
+                self.current_session["end_file"] = current_file
+        except Exception as e:
+            print(f"TimeTracker: Error updating file information: {e}")
 
 
 silhouette_tracker = None
 
 
 def initialize_silhouette_tracker():
-    """Initialize the Silhouette tracker singleton"""
+    """Initialize the SilhouetteFX tracker singleton"""
     global silhouette_tracker
     if silhouette_tracker is None:
         silhouette_tracker = SilhouetteTimeTracker()
     return silhouette_tracker
 
 
-# Auto-initialize when imported in Silhouette
+# Auto-initialize when imported in SilhouetteFX
 if __name__ == "__main__":
     # In production, you would use:
     initialize_silhouette_tracker()

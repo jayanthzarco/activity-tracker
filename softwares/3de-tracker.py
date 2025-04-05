@@ -1,13 +1,26 @@
-import os
-import json
-import time
-import datetime
-import getpass
-import threading
-from pynput import mouse, keyboard
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+# 3D Equalizer Time Tracker - Python 2.7.5 Compatible Version
+
+import os, json, time, datetime, getpass, threading
+
+try:
+    # Python 2.7 compatibility for input
+    input = raw_input
+except NameError:
+    pass
+
+# Try to import pynput - if not available, provide instructions
+try:
+    from pynput import mouse, keyboard
+    PYNPUT_AVAILABLE = True
+except ImportError:
+    PYNPUT_AVAILABLE = False
+    print("Continuing with limited functionality (no automatic idle detection).")
 
 
-class BaseTimeTracker:
+class BaseTimeTracker(object):
     def __init__(self):
         # Constants
         self.IDLE_THRESHOLD = 180  # seconds without activity considered idle
@@ -27,8 +40,12 @@ class BaseTimeTracker:
         # Load existing data
         self.tracking_data = self.load_tracking_data()
 
-        # Setup input listeners
-        self.setup_input_listeners()
+        # Setup input listeners if pynput is available
+        if PYNPUT_AVAILABLE:
+            self.setup_input_listeners()
+        else:
+            # Set initial activity time
+            self.last_activity_time = time.time()
 
         # Start the background thread
         self.start_background_thread()
@@ -42,7 +59,7 @@ class BaseTimeTracker:
                 with open(self.JSON_FILE, 'r') as f:
                     return json.load(f)
             except Exception as e:
-                print(f"TimeTracker: Error loading tracking data: {e}")
+                print("TimeTracker: Error loading tracking data: {0}".format(e))
                 return []
         return []
 
@@ -52,10 +69,13 @@ class BaseTimeTracker:
             with open(self.JSON_FILE, 'w') as f:
                 json.dump(self.tracking_data, f, indent=4)
         except Exception as e:
-            print(f"TimeTracker: Error saving tracking data: {e}")
+            print("TimeTracker: Error saving tracking data: {0}".format(e))
 
     def setup_input_listeners(self):
         """Set up listeners for mouse and keyboard activity"""
+        if not PYNPUT_AVAILABLE:
+            return
+
         # Create and start mouse listener
         self.mouse_listener = mouse.Listener(
             on_move=self.on_mouse_move,
@@ -102,7 +122,7 @@ class BaseTimeTracker:
         """Convert seconds to HH:MM:SS format"""
         hours, remainder = divmod(int(seconds), 3600)
         minutes, seconds = divmod(remainder, 60)
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        return "{0:02d}:{1:02d}:{2:02d}".format(hours, minutes, seconds)
 
     def start_background_thread(self):
         """Start a background daemon thread for activity monitoring"""
@@ -147,7 +167,7 @@ class BaseTimeTracker:
             self.active_time = int(active_parts[0]) * 3600 + int(active_parts[1]) * 60 + int(active_parts[2])
             self.idle_time = int(idle_parts[0]) * 3600 + int(idle_parts[1]) * 60 + int(idle_parts[2])
 
-            print(f"TimeTracker: Continuing tracking session for {start_file}")
+            print("TimeTracker: Continuing tracking session for {0}".format(start_file))
         else:
             # Create a new session
             current_time = datetime.datetime.now()
@@ -169,7 +189,7 @@ class BaseTimeTracker:
             self.tracking_data.append(self.current_session)
             self.active_time = 0
             self.idle_time = 0
-            print(f"TimeTracker: Started tracking session for {start_file}")
+            print("TimeTracker: Started tracking session for {0}".format(start_file))
 
         self.is_tracking = True
         self.last_activity_time = time.time()
@@ -196,7 +216,11 @@ class BaseTimeTracker:
         self.save_tracking_data()
 
         print(
-            f"TimeTracker: Ended tracking session. Active: {self.seconds_to_hh_mm_ss(self.active_time)}, Idle: {self.seconds_to_hh_mm_ss(self.idle_time)}")
+            "TimeTracker: Ended tracking session. Active: {0}, Idle: {1}".format(
+                self.seconds_to_hh_mm_ss(self.active_time),
+                self.seconds_to_hh_mm_ss(self.idle_time)
+            )
+        )
 
         # Reset state
         self.is_tracking = False
@@ -209,16 +233,22 @@ class BaseTimeTracker:
 
         current_time = time.time()
 
-        # Determine if user is idle based on time since last input
-        is_idle = (current_time - self.last_activity_time) > self.IDLE_THRESHOLD
-
-        if is_idle:
-            # User is idle
-            self.idle_time += self.CHECK_INTERVAL
-            self.user_active = False
-        else:
-            # User is active
+        # If pynput is not available, assume user is always active or handle manually
+        if not PYNPUT_AVAILABLE:
+            # Register activity every time 3DE calls a tool or function
+            # This is a fallback that will be improved in the TDETimeTracker class
             self.active_time += self.CHECK_INTERVAL
+        else:
+            # Determine if user is idle based on time since last input
+            is_idle = (current_time - self.last_activity_time) > self.IDLE_THRESHOLD
+
+            if is_idle:
+                # User is idle
+                self.idle_time += self.CHECK_INTERVAL
+                self.user_active = False
+            else:
+                # User is active
+                self.active_time += self.CHECK_INTERVAL
 
         # Update the current session
         if self.current_session:
@@ -240,12 +270,18 @@ class BaseTimeTracker:
         """Clean shutdown of tracker"""
         self.running = False
         # Stop input listeners
-        if hasattr(self, 'mouse_listener') and self.mouse_listener.is_alive():
-            self.mouse_listener.stop()
-        if hasattr(self, 'keyboard_listener') and self.keyboard_listener.is_alive():
-            self.keyboard_listener.stop()
+        if PYNPUT_AVAILABLE:
+            if hasattr(self, 'mouse_listener') and self.mouse_listener.is_alive():
+                self.mouse_listener.stop()
+            if hasattr(self, 'keyboard_listener') and self.keyboard_listener.is_alive():
+                self.keyboard_listener.stop()
         self.end_tracking_session()
         print("Time Tracker shut down")
+
+    def manual_activity_ping(self):
+        """Method that can be called from 3DE callbacks to register activity"""
+        self.last_activity_time = time.time()
+        self.user_active = True
 
 
 class TDETimeTracker(BaseTimeTracker):
@@ -253,153 +289,210 @@ class TDETimeTracker(BaseTimeTracker):
         # Define 3DEqualizer-specific constants
         self.JSON_FILE = os.path.expanduser("~/3de_time_tracking.json")
 
-        # Call parent constructor
-        super(TDETimeTracker, self).__init__()
-
         # Import 3DEqualizer modules here to avoid issues if used in non-3DE environment
         try:
             import tde4
+            self.tde4 = tde4
+            self.tde_available = True
         except ImportError:
-            print("RUN IN 3DEQUALIZER")
-            return
-        self.tde4 = tde4
+            print("WARNING: Unable to import tde4 module. Run this script in 3D Equalizer.")
+            self.tde_available = False
 
-        # Setup 3DEqualizer callbacks
-        self.setup_callbacks()
+        # Call parent constructor - use old-style class call for Python 2.7
+        BaseTimeTracker.__init__(self)
 
-        print("3DEqualizer Time Tracker initialized")
+        # Initialize tracking if a project is already open
+        if self.tde_available:
+            self.initialize_tracking()
+            print("3D Equalizer Time Tracker initialized")
+        else:
+            print("Running in limited mode without 3DE API access")
 
-    def setup_callbacks(self):
-        """Set up 3DEqualizer callbacks to track file operations"""
+    def get_3de_version(self):
+        """Get 3DEqualizer version safely"""
+        if not self.tde_available:
+            return "Unknown"
+
         try:
-            # Unfortunately 3DEqualizer doesn't have built-in callbacks like Maya or Nuke
-            # We'll use a polling approach instead and hook into menu commands
-            self.poll_current_file()
+            # Different 3DE versions might have different ways to get version info
+            # Try standard method first
+            version = self.tde4.get3DEVersion()
+            if version:
+                return version
 
-        except Exception as e:
-            print(f"TimeTracker: Error setting up 3DEqualizer callbacks: {e}")
-
-    def poll_current_file(self):
-        """Start a polling thread to check for file changes in 3DEqualizer"""
-
-        def poll_file_thread():
-            last_project_path = ""
-            while self.running:
-                try:
-                    # Check if project has changed
-                    current_project_path = self.get_current_project_path()
-
-                    if current_project_path != last_project_path:
-                        # Project changed
-                        if current_project_path:
-                            # Project opened or changed
-                            file_name = os.path.basename(current_project_path)
-                            self.start_tde_session(file_name)
-                        else:
-                            # Project closed
-                            self.end_tracking_session()
-
-                        last_project_path = current_project_path
-
-                except Exception as e:
-                    print(f"TimeTracker: Error polling 3DEqualizer: {e}")
-
-                time.sleep(5)  # Check every 5 seconds
-
-        # Start polling thread
-        poll_thread = threading.Thread(target=poll_file_thread)
-        poll_thread.daemon = True
-        poll_thread.start()
-
-    def get_current_project_path(self):
-        """Get current 3DEqualizer project path"""
-        try:
-            # Get current project path - this method will vary based on 3DE API
-            project_path = self.tde4.getProjectPath()
-            return project_path
-        except:
-            # Fallback method if the above doesn't work
+            # Alternative methods if the above doesn't work
             try:
-                # Another possible way to get project path
-                cam_list = self.tde4.getCameraList()
-                if cam_list:
-                    return self.tde4.getCameraPath(cam_list[0])
-                return ""
+                release = self.tde4.get3DERelease()
+                if release:
+                    return release
             except:
-                return ""
+                pass
 
-    def hook_3de_menu_callbacks(self):
-        """
-        Hook into 3DEqualizer menu commands to track file operations
-        Note: This requires custom menu integration in 3DEqualizer
-        """
+            # If all fails, return a default
+            return "Unknown"
+        except:
+            return "Unknown"
+
+    def get_project_path(self):
+        """Get current project path safely"""
+        if not self.tde_available:
+            return ""
+
         try:
-            # This is a simplified example - actual implementation would depend on
-            # how 3DEqualizer allows for menu customization
+            # Different 3DE versions might have different API calls
+            # Try the most common ones
+            try:
+                return self.tde4.getProjectPath()
+            except:
+                pass
 
-            # Example of how to hook file operations if 3DE supports it
-            req = self.tde4.createCustomRequester()
+            try:
+                return self.tde4.getProjectFilepath()
+            except:
+                pass
 
-            # Hook file open
-            self.tde4.addMenuBarWidget(req, "File_Open_Menu", "File/Open...")
-            self.tde4.setWidgetCallbackFunction(req, "File_Open_Menu", "on_file_open")
+            # If all else fails
+            return ""
+        except:
+            return ""
 
-            # Hook file save
-            self.tde4.addMenuBarWidget(req, "File_Save_Menu", "File/Save")
-            self.tde4.setWidgetCallbackFunction(req, "File_Save_Menu", "on_file_save")
+    def initialize_tracking(self):
+        """Initialize tracking based on current 3DEqualizer state"""
+        try:
+            # Get current project path
+            project_path = self.get_project_path()
+            project_name = os.path.basename(project_path) if project_path else "untitled"
 
-            # Hook file save as
-            self.tde4.addMenuBarWidget(req, "File_SaveAs_Menu", "File/Save As...")
-            self.tde4.setWidgetCallbackFunction(req, "File_SaveAs_Menu", "on_file_save_as")
+            # Get 3DE version
+            version = self.get_3de_version()
+            app_name = "3DEqualizer {0}".format(version)
 
-            # Hook application exit
-            self.tde4.addMenuBarWidget(req, "File_Exit_Menu", "File/Exit")
-            self.tde4.setWidgetCallbackFunction(req, "File_Exit_Menu", "on_app_exit")
-
+            self.start_tracking_session(app_name, project_name)
         except Exception as e:
-            print(f"TimeTracker: Error setting up 3DEqualizer menu hooks: {e}")
+            print("TimeTracker: Error initializing tracking: {0}".format(e))
 
-    def on_file_open(self, req, widget, action):
-        """Called when a file is opened"""
-        file_path = self.get_current_project_path()
-        if file_path:
-            file_name = os.path.basename(file_path)
-            self.start_tde_session(file_name)
+    def fetch_project_details(self):
+        """Collect information about the current 3DE project"""
+        if not self.tde_available:
+            return {}
 
-    def on_file_save(self, req, widget, action):
-        """Called when a file is saved"""
-        file_path = self.get_current_project_path()
-        if file_path and self.current_session:
-            file_name = os.path.basename(file_path)
-            self.current_session["end_file"] = file_name
-            self.save_tracking_data()
-            print(f"TimeTracker: Updated session for {file_name}")
+        details = {}
 
-    def on_file_save_as(self, req, widget, action):
-        """Called when a file is saved as a new file"""
-        file_path = self.get_current_project_path()
-        if file_path and self.current_session:
-            file_name = os.path.basename(file_path)
-            self.current_session["end_file"] = file_name
-            self.save_tracking_data()
-            print(f"TimeTracker: Updated session for {file_name}")
+        try:
+            # Get number of cameras in the project (try different API approaches)
+            try:
+                cam_list = self.tde4.getCameraList()
+                details["num_cameras"] = len(cam_list) if cam_list else 0
+            except:
+                details["num_cameras"] = 0
 
-    def on_app_exit(self, req, widget, action):
-        """Called when 3DEqualizer is exiting"""
+            # Get number of point groups and 3D points
+            try:
+                pg_list = self.tde4.getPGroupList()
+                details["num_point_groups"] = len(pg_list) if pg_list else 0
+
+                # Get total number of 3D points
+                total_points = 0
+                for pg in pg_list:
+                    try:
+                        points = self.tde4.getPointList(pg)
+                        total_points += len(points) if points else 0
+                    except:
+                        pass
+                details["total_points"] = total_points
+            except:
+                details["num_point_groups"] = 0
+                details["total_points"] = 0
+
+            # Get camera and lens information if available
+            try:
+                if "num_cameras" in details and details["num_cameras"] > 0:
+                    cam_list = self.tde4.getCameraList()
+                    cam_details = []
+
+                    for cam in cam_list:
+                        try:
+                            cam_name = self.tde4.getCameraName(cam)
+                            lens = self.tde4.getCameraLens(cam)
+                            lens_name = self.tde4.getLensName(lens) if lens else "Unknown"
+
+                            cam_details.append({
+                                "name": cam_name,
+                                "lens": lens_name
+                            })
+                        except:
+                            pass
+
+                    details["cameras"] = cam_details
+            except:
+                pass
+        except Exception as e:
+            print("TimeTracker: Error fetching project details: {0}".format(e))
+
+        return details
+
+    def check_activity(self):
+        """Override check_activity to also update file information"""
+        # First, run the parent class's check_activity
+        BaseTimeTracker.check_activity(self)
+
+        # Then, update file information if in 3DE
+        if self.tde_available:
+            try:
+                if self.is_tracking and self.current_session:
+                    project_path = self.get_project_path()
+                    current_file = os.path.basename(project_path) if project_path else "untitled"
+
+                    # If no start file is set, use current file as start file
+                    if not self.current_session["start_file"] or self.current_session["start_file"] == "untitled":
+                        if current_file != "untitled":
+                            self.current_session["start_file"] = current_file
+
+                    # Always update end file to current file
+                    self.current_session["end_file"] = current_file
+
+                    # Update project-specific details periodically (every minute)
+                    current_time = time.time()
+                    if not hasattr(self, 'last_details_update') or current_time - self.last_details_update >= 60:
+                        project_details = self.fetch_project_details()
+                        if project_details:
+                            if "project_details" not in self.current_session:
+                                self.current_session["project_details"] = {}
+
+                            self.current_session["project_details"].update(project_details)
+                            self.last_details_update = current_time
+
+            except Exception as e:
+                print("TimeTracker: Error updating file information: {0}".format(e))
+
+    def record_action(self, action_name):
+        """Record a specific 3DE user action - can be called from custom tools"""
+        if not self.is_tracking:
+            return
+
+        # Register that the user is active
+        self.manual_activity_ping()
+
+        # Optionally record the specific action
+        if self.current_session:
+            if "actions" not in self.current_session:
+                self.current_session["actions"] = []
+
+            self.current_session["actions"].append({
+                "action": action_name,
+                "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
+
+            # Keep the action list from growing too large
+            if len(self.current_session["actions"]) > 100:
+                self.current_session["actions"] = self.current_session["actions"][-100:]
+
+    def on_project_close(self):
+        """Called when 3DEqualizer project is closed or 3DE is exiting"""
         self.shutdown()
 
-    def start_tde_session(self, file_name):
-        """Start tracking for a 3DEqualizer file"""
-        try:
-            # Get 3DEqualizer version
-            tde_version = self.tde4.get3DEVersion()
-        except:
-            tde_version = "Unknown"
 
-        app_name = f"3DEqualizer {tde_version}"
-        self.start_tracking_session(app_name, file_name)
-
-
+# Global singleton instance
 tde_tracker = None
 
 
@@ -411,7 +504,16 @@ def initialize_tde_tracker():
     return tde_tracker
 
 
+def record_user_action(action_name):
+    """Helper function to record a user action from 3DE scripts"""
+    global tde_tracker
+    if tde_tracker is not None:
+        tde_tracker.record_action(action_name)
+    else:
+        tde_tracker = initialize_tde_tracker()
+        tde_tracker.record_action(action_name)
+
+
 # Auto-initialize when imported in 3DEqualizer
 if __name__ == "__main__":
-    # In production, you would use:
     initialize_tde_tracker()

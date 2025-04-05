@@ -1,9 +1,4 @@
-import os
-import json
-import time
-import datetime
-import getpass
-import threading
+import os, json, time, datetime, getpass, threading
 from pynput import mouse, keyboard
 
 
@@ -265,7 +260,7 @@ class NukeTimeTracker(BaseTimeTracker):
         super(NukeTimeTracker, self).__init__()
 
         # Setup Nuke exit callback only
-        self.nuke.addOnScriptClose(self.on_script_close)
+        # self.nuke.addOnScriptClose(self.on_script_close)
 
         # Initialize tracking if a file is already open
         self.initialize_tracking()
