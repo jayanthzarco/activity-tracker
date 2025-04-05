@@ -5,11 +5,6 @@
 
 import os, json, time, datetime, getpass, threading
 
-try:
-    # Python 2.7 compatibility for input
-    input = raw_input
-except NameError:
-    pass
 
 # Try to import pynput - if not available, provide instructions
 try:
@@ -371,68 +366,8 @@ class TDETimeTracker(BaseTimeTracker):
         except Exception as e:
             print("TimeTracker: Error initializing tracking: {0}".format(e))
 
-    def fetch_project_details(self):
-        """Collect information about the current 3DE project"""
-        if not self.tde_available:
-            return {}
-
-        details = {}
-
-        try:
-            # Get number of cameras in the project (try different API approaches)
-            try:
-                cam_list = self.tde4.getCameraList()
-                details["num_cameras"] = len(cam_list) if cam_list else 0
-            except:
-                details["num_cameras"] = 0
-
-            # Get number of point groups and 3D points
-            try:
-                pg_list = self.tde4.getPGroupList()
-                details["num_point_groups"] = len(pg_list) if pg_list else 0
-
-                # Get total number of 3D points
-                total_points = 0
-                for pg in pg_list:
-                    try:
-                        points = self.tde4.getPointList(pg)
-                        total_points += len(points) if points else 0
-                    except:
-                        pass
-                details["total_points"] = total_points
-            except:
-                details["num_point_groups"] = 0
-                details["total_points"] = 0
-
-            # Get camera and lens information if available
-            try:
-                if "num_cameras" in details and details["num_cameras"] > 0:
-                    cam_list = self.tde4.getCameraList()
-                    cam_details = []
-
-                    for cam in cam_list:
-                        try:
-                            cam_name = self.tde4.getCameraName(cam)
-                            lens = self.tde4.getCameraLens(cam)
-                            lens_name = self.tde4.getLensName(lens) if lens else "Unknown"
-
-                            cam_details.append({
-                                "name": cam_name,
-                                "lens": lens_name
-                            })
-                        except:
-                            pass
-
-                    details["cameras"] = cam_details
-            except:
-                pass
-        except Exception as e:
-            print("TimeTracker: Error fetching project details: {0}".format(e))
-
-        return details
-
     def check_activity(self):
-        """Override check_activity to also update file information"""
+        """Override check_activity to update file information only"""
         # First, run the parent class's check_activity
         BaseTimeTracker.check_activity(self)
 
@@ -451,41 +386,16 @@ class TDETimeTracker(BaseTimeTracker):
                     # Always update end file to current file
                     self.current_session["end_file"] = current_file
 
-                    # Update project-specific details periodically (every minute)
-                    current_time = time.time()
-                    if not hasattr(self, 'last_details_update') or current_time - self.last_details_update >= 60:
-                        project_details = self.fetch_project_details()
-                        if project_details:
-                            if "project_details" not in self.current_session:
-                                self.current_session["project_details"] = {}
-
-                            self.current_session["project_details"].update(project_details)
-                            self.last_details_update = current_time
-
             except Exception as e:
                 print("TimeTracker: Error updating file information: {0}".format(e))
 
     def record_action(self, action_name):
-        """Record a specific 3DE user action - can be called from custom tools"""
+        """Record a specific 3DE user action - simplified to just ping activity"""
         if not self.is_tracking:
             return
 
         # Register that the user is active
         self.manual_activity_ping()
-
-        # Optionally record the specific action
-        if self.current_session:
-            if "actions" not in self.current_session:
-                self.current_session["actions"] = []
-
-            self.current_session["actions"].append({
-                "action": action_name,
-                "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            })
-
-            # Keep the action list from growing too large
-            if len(self.current_session["actions"]) > 100:
-                self.current_session["actions"] = self.current_session["actions"][-100:]
 
     def on_project_close(self):
         """Called when 3DEqualizer project is closed or 3DE is exiting"""
@@ -504,14 +414,14 @@ def initialize_tde_tracker():
     return tde_tracker
 
 
-def record_user_action(action_name):
-    """Helper function to record a user action from 3DE scripts"""
-    global tde_tracker
-    if tde_tracker is not None:
-        tde_tracker.record_action(action_name)
-    else:
-        tde_tracker = initialize_tde_tracker()
-        tde_tracker.record_action(action_name)
+# def record_user_action(action_name):
+#     """Helper function to record a user action from 3DE scripts"""
+#     global tde_tracker
+#     if tde_tracker is not None:
+#         tde_tracker.record_action(action_name)
+#     else:
+#         tde_tracker = initialize_tde_tracker()
+#         tde_tracker.record_action(action_name)
 
 
 # Auto-initialize when imported in 3DEqualizer
