@@ -1,8 +1,6 @@
 from PySide2 import QtWidgets, QtCore, QtGui
 import sqlite3
 import sys
-from datetime import datetime, timedelta
-import os
 import json
 
 

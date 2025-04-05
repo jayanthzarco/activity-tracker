@@ -253,72 +253,60 @@ class NukeTimeTracker(BaseTimeTracker):
         # Define Nuke-specific constants
         self.JSON_FILE = os.path.expanduser("~/nuke_time_tracking.json")
 
-        # Call parent constructor
-        super(NukeTimeTracker, self).__init__()
-
         # Import Nuke modules here to avoid issues if used in non-Nuke environment
         try:
             import nuke
+            self.nuke = nuke
         except ImportError:
             print("RUN IN NUKE")
             return
-        self.nuke = nuke
 
-        # Setup Nuke callbacks
-        self.setup_callbacks()
+        # Call parent constructor
+        super(NukeTimeTracker, self).__init__()
+
+        # Setup Nuke exit callback only
+        self.nuke.addOnScriptClose(self.on_script_close)
+
+        # Initialize tracking if a file is already open
+        self.initialize_tracking()
 
         print("Nuke Time Tracker initialized")
 
-    def setup_callbacks(self):
-        """Set up Nuke callbacks to track file operations"""
+    def initialize_tracking(self):
+        """Initialize tracking based on current Nuke state"""
         try:
-            # File open callback
-            self.nuke.addOnScriptLoad(self.on_script_load)
-
-            # New script callback
-            self.nuke.addOnCreate(self.on_create, nodeClass='Root')
-
-            # File save callback
-            self.nuke.addOnScriptSave(self.on_script_save)
-
-            # Nuke exit callback
-            self.nuke.addOnScriptClose(self.on_script_close)
-
+            file_path = self.nuke.root().name()
+            file_name = os.path.basename(file_path) if file_path else "untitled"
+            nuke_version = self.nuke.NUKE_VERSION_STRING
+            app_name = f"Nuke {nuke_version}"
+            self.start_tracking_session(app_name, file_name)
         except Exception as e:
-            print(f"TimeTracker: Error setting up Nuke callbacks: {e}")
-
-    def on_script_load(self):
-        """Called when a script is loaded"""
-        file_path = self.nuke.root().name()
-        if file_path:
-            file_name = os.path.basename(file_path)
-            self.start_nuke_session(file_name)
-
-    def on_create(self):
-        """Called when a new script is created"""
-        # This gets called when a new Root node is created (new script)
-        if self.nuke.root().name() == "":
-            self.start_nuke_session("untitled")
-
-    def on_script_save(self):
-        """Called when a script is saved"""
-        file_path = self.nuke.root().name()
-        file_name = os.path.basename(file_path) if file_path else "untitled"
-
-        if self.current_session:
-            self.current_session["end_file"] = file_name
-            self.save_tracking_data()
-            print(f"TimeTracker: Updated session for {file_name}")
+            print(f"TimeTracker: Error initializing tracking: {e}")
 
     def on_script_close(self):
         """Called when Nuke script is closed or Nuke is exiting"""
         self.shutdown()
 
-    def start_nuke_session(self, file_name):
-        """Start tracking for a Nuke file"""
-        nuke_version = self.nuke.NUKE_VERSION_STRING
-        app_name = f"Nuke {nuke_version}"
-        self.start_tracking_session(app_name, file_name)
+    def check_activity(self):
+        """Override check_activity to also update file information"""
+        # First, run the parent class's check_activity
+        super(NukeTimeTracker, self).check_activity()
+
+        # Then, update file information
+        try:
+            if self.is_tracking and self.current_session:
+                file_path = self.nuke.root().name()
+                current_file = os.path.basename(file_path) if file_path else "untitled"
+
+                # If no start file is set, use current file as start file
+                if not self.current_session["start_file"] or self.current_session["start_file"] == "untitled":
+                    if current_file != "untitled":
+                        self.current_session["start_file"] = current_file
+
+                # Always update end file to current file
+                self.current_session["end_file"] = current_file
+        except Exception as e:
+            print(f"TimeTracker: Error updating file information: {e}")
 
 
 nuke_tracker = None
