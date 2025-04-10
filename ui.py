@@ -78,7 +78,7 @@ class ActivityMonitorUI(QtWidgets.QWidget):
 
         # Add button to load from JSON
         self.load_json_button = QtWidgets.QPushButton("Load From JSON")
-        self.load_json_button.clicked.connect(self.load_from_json)
+        # self.load_json_button.clicked.connect(self.load_from_json)
 
         button_layout.addWidget(self.export_button)
         button_layout.addWidget(self.refresh_button)
@@ -202,88 +202,6 @@ class ActivityMonitorUI(QtWidgets.QWidget):
         self.software_completer.setModel(software_model)
 
         conn.close()
-
-    def load_from_json(self):
-        """Load activity data from JSON files instead of database"""
-        # Ask user to select a directory where JSON files are stored
-        json_dir = QtWidgets.QFileDialog.getExistingDirectory(
-            self, "Select Directory with JSON Files", "",
-            QtWidgets.QFileDialog.ShowDirsOnly | QtWidgets.QFileDialog.DontResolveSymlinks
-        )
-
-        if not json_dir or not os.path.isdir(json_dir):
-            return
-
-        # Look for JSON files in the directory
-        json_files = [f for f in os.listdir(json_dir) if f.endswith('.json')]
-        if not json_files:
-            QtWidgets.QMessageBox.warning(self, "No JSON Files", f"No JSON files found in {json_dir}")
-            return
-
-        # Clear existing table data
-        self.table.setRowCount(0)
-
-        # Load data from each JSON file
-        row_idx = 0
-        for json_file in json_files:
-            try:
-                with open(os.path.join(json_dir, json_file), 'r') as f:
-                    data = json.load(f)
-
-                    # Process each activity record in the JSON file
-                    if isinstance(data, dict) and 'activities' in data:
-                        activities = data['activities']
-                        for activity in activities:
-                            # Extract fields that match our table
-                            username = data.get('username', 'Unknown')
-                            log_date = activity.get('date', 'Unknown')
-                            software = activity.get('software', 'Unknown')
-                            start_file = activity.get('start_file', '')
-                            end_file = activity.get('end_file', '')
-                            start_time = activity.get('start_time', '')
-                            active_time = activity.get('active_time', 0)  # in seconds
-                            idle_time = activity.get('idle_time', 0)  # in seconds
-                            total_time = active_time + idle_time  # in seconds
-                            end_time = activity.get('end_time', '')
-
-                            # Format times
-                            active_time_formatted = self.format_time_seconds_to_hms(active_time)
-                            idle_time_formatted = self.format_time_seconds_to_hms(idle_time)
-                            total_time_formatted = self.format_time_seconds_to_hms(total_time)
-
-                            # Format file display
-                            file_display = f"{start_file} ---> {end_file}"
-
-                            # Add to table
-                            self.table.insertRow(row_idx)
-                            self.table.setItem(row_idx, 0, QtWidgets.QTableWidgetItem(username))
-                            self.table.setItem(row_idx, 1, QtWidgets.QTableWidgetItem(log_date))
-                            self.table.setItem(row_idx, 2, QtWidgets.QTableWidgetItem(software))
-                            self.table.setItem(row_idx, 3, QtWidgets.QTableWidgetItem(file_display))
-                            self.table.setItem(row_idx, 4, QtWidgets.QTableWidgetItem(start_time))
-                            self.table.setItem(row_idx, 5, QtWidgets.QTableWidgetItem(active_time_formatted))
-                            self.table.setItem(row_idx, 6, QtWidgets.QTableWidgetItem(idle_time_formatted))
-                            self.table.setItem(row_idx, 7, QtWidgets.QTableWidgetItem(total_time_formatted))
-                            self.table.setItem(row_idx, 8, QtWidgets.QTableWidgetItem(end_time))
-
-                            row_idx += 1
-            except Exception as e:
-                print(f"Error loading JSON file {json_file}: {str(e)}")
-
-        # Update status message with count of records
-        self.setWindowTitle(f"Activity Monitor - {row_idx} records loaded from JSON")
-
-        # We don't update completers here since we're not using the database
-
-        # Inform user
-        if row_idx > 0:
-            QtWidgets.QMessageBox.information(
-                self, "JSON Data Loaded", f"Successfully loaded {row_idx} records from JSON files"
-            )
-        else:
-            QtWidgets.QMessageBox.warning(
-                self, "No Data Found", "No valid activity records found in JSON files"
-            )
 
     def apply_filters(self):
         self.load_data()
